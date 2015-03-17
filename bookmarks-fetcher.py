@@ -63,6 +63,9 @@ parser.add_option("-m", "--markdown", dest="markdown",
 parser.add_option("-n", "--no-download", dest="download",
                 action="store_false", default="True",
                 help="do not download files")
+parser.add_option("-p", "--create-playlist", dest="makeplaylist"
+                action="store", default="False",
+                help="only create a playlist of remote media URLs")
 
 (options, args) = parser.parse_args()
 
@@ -84,6 +87,10 @@ except (IOError):
     exit(1)
 
 already_downloaded = open(options.destdir + "/" + downloaded_filename, "a+")
+curdate = time.strftime('%Y-%m-%d_%H%M')
+
+if makeplaylist = True:
+    playlist_out = open(options.destdir + "/playlist-" + curdate + ".m3u", "a+")
 
 ###############################################################################
 ######### FUNCTIONS
@@ -92,10 +99,9 @@ already_downloaded = open(options.destdir + "/" + downloaded_filename, "a+")
 
 def gen_markdown(downloadqueue): #Generate markdown copy of all links
     print "DEBUG: gen_markdown"
-    curdate = time.strftime('%Y-%m-%d_%H%M')
     markdownoutfilename = options.destdir + "/" + "links-" + curdate + ".md"
     print "DEBUG: date is %s, outfile is %s" % (curdate, markdownoutfilename)
-    
+
     try:
         os.makedirs(options.destdir)
     except:
