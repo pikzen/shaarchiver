@@ -4,9 +4,7 @@
 # License: GNU GPLv3 (https://www.gnu.org/copyleft/gpl.html)
 # Copyright (c) 2014-2015 nodiscc <nodiscc@gmail.com>
 
-# TODO write successfully downloaded urls in done.log
-#      if link has already been downloaded, skip download (--skip)
-#      if link has already been downloaded, just check headers with curl/ytdl and issue a warning if page is gone.
+# TODO if link has already been downloaded, just check headers with curl/ytdl and issue a warning if page is gone.
 # TODO catch errors and write them in shaarchiver-errors-date.log
 # TODO escape special markdown characters when writing descriptions
 # TODO [doc] add examples blacklist entries for youtube channels, soundcloud streams...
@@ -58,7 +56,7 @@ from collections import namedtuple
 curdate = time.strftime('%Y-%m-%d_%H%M')
 # Define a struct to hold a link data
 # namedtuples are immutables
-Link = namedtuple("Link", "add_date href private tags title description")
+Link = namedtuple("Link", "add_date href private tags title description type")
 
 # Converts a string to its unicode representation
 def make_unicode(input):
@@ -156,13 +154,16 @@ if options.maximum_date is not None:
 
 
 # Open files
-try:
-    os.makedirs(options.destdir)
-    os.makedirs(options.destdir + "/video")
-    os.makedirs(options.destdir + "/audio")
-    os.makedirs(options.destdir + "/pages")
-except:
-    pass
+folders = [options.destdir,
+           options.destdir + "/video",
+           options.destdir + "/audio",
+           options.destdir + "/pages",
+           options.destdir + "/magnets"]
+for folder in folders:
+    try:
+        os.makedirs(folder)
+    except Exception as e:
+        print "Skipping creating %s because it already exists." % folder
 
 if options.markdown:
     markdownfile = options.destdir + "/links-" + curdate + ".md"
@@ -178,12 +179,17 @@ downloaded_urls = [x.replace('\n', '') for x in downloaded_urls]
 
 # Parse HTML
 rawdata = bookmarksfile.read()
-bsdata = BeautifulSoup(rawdata)
+bsdata = BeautifulSoup(rawdata, "lxml")
 alllinks = bsdata.find_all(["dt", "dd"])
 
 #############################################
 # Functions
 def getlinktags(link):     # return tags for a link (list)
+    '''
+    Get a list of tags for a link
+    Returns an empty list if no tags are present
+    LEGACY - No longer used. Delete me.
+    '''
     linktags = link.get('tags')
     if linktags is None:
         linktags = list()
@@ -191,7 +197,11 @@ def getlinktags(link):     # return tags for a link (list)
         linktags = linktags.split(',')
     return linktags
 
+
 def get_link_list(links):
+    '''
+    Builds a list of Link objects from a tag soup.
+    '''
     item_count = len(links)
     link_list = list()
     for i in range(0, item_count):
@@ -207,27 +217,55 @@ def get_link_list(links):
         tags_as_list = list()
         if subtag.has_attr('tags'):
             tags_as_list = subtag['tags'].split(',')
-        
+
+        link_type = 'url'
+        if subtag['href'].startswith('magnet:'):
+            matches = re.match("magnet:.*xt.*=.*urn:.*:([^&]*)?", subtag['href'])
+            if matches:
+                print("oh noes")
+                link_type = 'magnet'
+
         item = Link(add_date=subtag['add_date'],
                     href=subtag['href'],
                     private=subtag['private'] == "1",
                     tags=tags_as_list,
                     title=subtag.contents[0],
-                    description=desc)
+                    description=desc,
+                    type=link_type)
 
         link_list.append(item)
-
     return link_list
 
 
-def match_list(linktags, matchagainst): # check if sets have a common element (bool)
-        if bool(set(linktags) & set(matchagainst)):
-            return True
-        else:
-            return False
+def match_list(linktags, matchagainst):  # check if sets have a common element (bool)
+    '''
+    Check if two lists have at least one common element
+    '''
+    if bool(set(linktags) & set(matchagainst)):
+        return True
+    else:
+        return False
+
+
+def extract_magnet_hash(url):
+    '''
+    Extract the magnet hash from a given URL
+    Returns the hash if it could be found, or an empty string.
+    '''
+    hash = ""
+
+    matches = re.match("magnet:.*xt.*=urn:.*:([^&]*)?", url)
+    if matches:
+        hash = matches.group(1)
+
+    return hash
 
 
 def check_dl(linktags, linkurl):  # check if given link should be downloaded (bool)
+    '''
+    Given its url and tags, check if a link should be downloaded or not
+    Takes into account the url blacklist, options and the list of already downloaded URLs
+    '''
     allowed = True
     if linkurl in url_blacklist:
         msg = "[shaarchiver] Url %s is in blacklist. Not downloading item." % (make_unicode(linkurl))
@@ -253,12 +291,19 @@ def check_dl(linktags, linkurl):  # check if given link should be downloaded (bo
 
 
 def gen_markdown(link):  # Write markdown output to file
+    '''
+    Generates the markdown output for a given link and writes it.
+    '''
     tags = ""
     if len(link.tags) > 0:
         tags = ' @'
     tags += ' @'.join(link.tags)
 
-    mdline = make_unicode(" * [" + link.title + "](" + link.href + ")" + tags + "`\n")
+    prefix = ""
+    if link.type == 'magnet':
+        prefix = "MGNT"
+
+    mdline = make_unicode(" * " + prefix + " [" + link.title + "](" + link.href + ")" + tags + "`\n")
     markdown.write(mdline)
     if link.description != "":
         desc = make_unicode(u"```\n{0}```\n".format(link.description))
@@ -267,21 +312,34 @@ def gen_markdown(link):  # Write markdown output to file
 
 
 def download_page(linkurl, linktitle, linktags):
+    '''
+    Attempts to download a page using wget
+    '''
+    attempt_download = False
     if match_list(linktags, force_page_download_for):
         msg = "[shaarchiver] Force downloading page for %s" % linkurl
-        print(msg)
-        log.write(msg + "\n")
+        attempt_download = True
     elif match_list(linktags, download_video_for) or match_list(linktags, download_audio_for):
         msg = "[shaarchiver] %s will only be searched for media. Not downloading page" % linkurl
-        print(msg)
-        log.write(msg + "\n")
     else:
         msg = "[shaarchiver] Simulating page download for %s. Not yet implemented TODO" % ((linkurl + linktitle).encode('utf-8'))
+        attempt_download = True
         # TODO: download pages,see https://superuser.com/questions/55040/save-a-single-web-page-with-background-images-with-wget
         # TODO: if link has a numeric tag (d1, d2, d3), recursively follow links restricted to the domain/directory and download them.
-        print(msg)
-        log.write(msg + "\n")
+
+    print(msg)
+    log.write(msg + "\n")
     
+    if attempt_download:
+        print link.type
+        if link.type == "magnet":
+            hash = extract_magnet_hash(linkurl)
+            magnet_file = codecs.open(options.destdir + "/magnets/" + hash + ".magnet", "w+", encoding="utf-8")
+            magnet_file.write(linkurl)
+
+            msg = "[shaarchiver] Writing magnet link %s to magnets/ folder"
+            print(msg)
+            log.write(msg + "\n")
     if not options.no_skip:
         log_done.write(linkurl + "\n")
 
@@ -334,6 +392,9 @@ def debug_wait(msg):
     raw_input("DEBUG: %s") % msg
 
 def get_all_tags(alllinks):
+    '''
+    Retrieves the list of all the tags present in the link list
+    '''
     alltags = []
     for link in alllinks:
         alltags = list(set(alltags + link.tags))
