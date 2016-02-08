@@ -54,14 +54,16 @@ from subprocess import call
 from optparse import OptionParser
 from collections import namedtuple
 curdate = time.strftime('%Y-%m-%d_%H%M')
-# Define a struct to hold a link data
+
+# Define a struct to hold a link data
 # namedtuples are immutables
 Link = namedtuple("Link", "add_date href private tags title description type")
+
 
 # Converts a string to its unicode representation
 def make_unicode(input):
     if type(input) != unicode:
-        input =  input.decode('utf-8')
+        input = input.decode('utf-8')
         return input
     else:
         return input
@@ -190,7 +192,7 @@ def getlinktags(link):     # return tags for a link (list)
     Returns an empty list if no tags are present
     LEGACY - No longer used. Delete me.
     '''
-    linktags = link.get('tags')
+    linktags = make_unicode(link.get('tags'))
     if linktags is None:
         linktags = list()
     else:
@@ -216,7 +218,7 @@ def get_link_list(links):
         subtag = links[i].find('a')
         tags_as_list = list()
         if subtag.has_attr('tags'):
-            tags_as_list = subtag['tags'].split(',')
+            tags_as_list = make_unicode(subtag['tags'].encode('utf-8')).split(',')
 
         link_type = 'url'
         if subtag['href'].startswith('magnet:'):
@@ -225,12 +227,13 @@ def get_link_list(links):
                 print("oh noes")
                 link_type = 'magnet'
 
-        item = Link(add_date=subtag['add_date'],
-                    href=subtag['href'],
+        print subtag.contents[0]
+        item = Link(add_date=make_unicode(subtag['add_date'].encode('utf-8')),
+                    href=make_unicode(subtag['href'].encode('utf-8')),
                     private=subtag['private'] == "1",
                     tags=tags_as_list,
-                    title=subtag.contents[0],
-                    description=desc,
+                    title=make_unicode(subtag.contents[0].encode('utf-8')),
+                    description=make_unicode(desc.encode('utf-8')),
                     type=link_type)
 
         link_list.append(item)
@@ -258,7 +261,7 @@ def extract_magnet_hash(url):
     if matches:
         hash = matches.group(1)
 
-    return hash
+    return make_unicode(hash)
 
 
 def check_dl(linktags, linkurl):  # check if given link should be downloaded (bool)
@@ -322,22 +325,22 @@ def download_page(linkurl, linktitle, linktags):
     elif match_list(linktags, download_video_for) or match_list(linktags, download_audio_for):
         msg = "[shaarchiver] %s will only be searched for media. Not downloading page" % linkurl
     else:
-        msg = "[shaarchiver] Simulating page download for %s. Not yet implemented TODO" % ((linkurl + linktitle).encode('utf-8'))
+        msg = "[shaarchiver] Simulating page download for %s. Not yet implemented TODO" % (linkurl + linktitle)
         attempt_download = True
         # TODO: download pages,see https://superuser.com/questions/55040/save-a-single-web-page-with-background-images-with-wget
         # TODO: if link has a numeric tag (d1, d2, d3), recursively follow links restricted to the domain/directory and download them.
 
     print(msg)
     log.write(msg + "\n")
-    
+
     if attempt_download:
         print link.type
         if link.type == "magnet":
             hash = extract_magnet_hash(linkurl)
             magnet_file = codecs.open(options.destdir + "/magnets/" + hash + ".magnet", "w+", encoding="utf-8")
-            magnet_file.write(linkurl)
+            magnet_file.write(make_unicode(linkurl))
 
-            msg = "[shaarchiver] Writing magnet link %s to magnets/ folder"
+            msg = "[shaarchiver] Writing magnet link %s to magnets/ folder" % hash
             print(msg)
             log.write(msg + "\n")
     if not options.no_skip:
